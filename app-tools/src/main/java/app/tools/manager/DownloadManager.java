@@ -5,6 +5,7 @@ import android.app.Application;
 import android.app.ProgressDialog;
 import android.content.Context;
 import android.content.DialogInterface;
+import android.graphics.Color;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.Uri;
@@ -16,7 +17,9 @@ import android.os.Process;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.KeyEvent;
+import android.view.View;
 import android.view.WindowManager;
+import android.widget.TextView;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -41,6 +44,8 @@ public class DownloadManager extends Thread {
     private final static int NO_INTERNET_CONNECTION = 5;
     private final static int RESOURCES_READY = 6;
 
+    private static String BASE_URL = null;
+
     private List<Downloader> downloaderList = new ArrayList<>();
     private HttpURLConnection httpURLConnection;
     private DownloadListener downloadListener;
@@ -48,17 +53,30 @@ public class DownloadManager extends Thread {
     private Activity currentActivity;
     private InputStream inputStream;
     private String dialogTitle;
+    private String dialogMessage;
     private Context context;
 
     private boolean cancelOnPause = false;
     private boolean displayDialog = false;
-    private boolean horizontalStyle = true;
+    private boolean horizontalStyle = false;
     private boolean canceled = false;
+
+    private int dialogStyle = ProgressDialog.THEME_HOLO_LIGHT;
+    private int defaultProgressColor = Color.BLACK;
 
     public DownloadManager(Context context) {
         setActivityLifeCycle(context);
         new ErrorMessage(context);
         this.context = context;
+    }
+
+    public static String getBaseUrl() {
+        return BASE_URL;
+    }
+
+    public static void init(String baseUrl, String defaultErrorMessage) {
+        ErrorMessage.DEFAULT_CONNECTION_ERROR_MESSAGE = defaultErrorMessage;
+        DownloadManager.BASE_URL = baseUrl;
     }
 
     public void download(Downloader downloader) {
@@ -71,7 +89,7 @@ public class DownloadManager extends Thread {
         boolean error = false;
         try {
             Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND);
-            if (!isAvailabeInternetConnection()) {
+            if (!isAvailableInternetConnection()) {
                 message = handler.obtainMessage(NO_INTERNET_CONNECTION);
                 handler.sendMessage(message);
                 return;
@@ -210,7 +228,7 @@ public class DownloadManager extends Thread {
         }
     }
 
-    public boolean isAvailabeInternetConnection() {
+    public boolean isAvailableInternetConnection() {
         ConnectivityManager connectivityManager = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
         NetworkInfo networkInfo = connectivityManager.getActiveNetworkInfo();
         return networkInfo != null && networkInfo.isConnectedOrConnecting();
@@ -346,23 +364,31 @@ public class DownloadManager extends Thread {
         }
     });
 
-    public void showProgressDialog(String title, boolean horizontalStyle) {
-        setDisplayDialog(true);
-        setDialogTitle(title);
-        setHorizontalStyle(horizontalStyle);
+    public void showProgressDialog(String title, String message, boolean horizontalStyle, int color) {
+        this.defaultProgressColor = color;
+        this.displayDialog = true;
+        this.dialogTitle = title;
+        this.horizontalStyle = horizontalStyle;
+        this.dialogMessage = message;
+    }
+
+    public void showProgressDialog(String message) {
+        this.displayDialog = true;
+        this.dialogMessage = message;
     }
 
     private void onShowProgressDialog() {
+        if (progressDialog != null) return;
         try {
-            progressDialog = new ProgressDialog(context);
-            if (horizontalStyle)
-                progressDialog.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
+            progressDialog = new ProgressDialog(context, dialogStyle);
+            if (horizontalStyle) progressDialog.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
             progressDialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
                     | WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
                     | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
                     | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
                     | WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON);
-            progressDialog.setTitle(getDialogTitle());
+            progressDialog.setTitle(dialogTitle);
+            progressDialog.setMessage(dialogMessage);
             progressDialog.setCanceledOnTouchOutside(false);
             progressDialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
                 boolean onKeyPressed = false;
@@ -377,6 +403,13 @@ public class DownloadManager extends Thread {
                 }
             });
             progressDialog.show();
+
+            final int alertTitleId = context.getResources().getIdentifier("alertTitle", "id", "android");
+            final TextView alertTitle = (TextView) progressDialog.getWindow().getDecorView().findViewById(alertTitleId);
+            alertTitle.setTextColor(defaultProgressColor);
+            final int titleDividerId = context.getResources().getIdentifier("titleDivider", "id", "android");
+            final View titleDivider = progressDialog.getWindow().getDecorView().findViewById(titleDividerId);
+            titleDivider.setBackgroundColor(defaultProgressColor);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -395,23 +428,7 @@ public class DownloadManager extends Thread {
         this.downloadListener = downloadListener;
     }
 
-    public void setDisplayDialog(boolean displayDialog) {
-        this.displayDialog = displayDialog;
-    }
-
-    public void setDialogTitle(String dialogTitle) {
-        this.dialogTitle = dialogTitle;
-    }
-
-    public void setHorizontalStyle(boolean horizontalStyle) {
-        this.horizontalStyle = horizontalStyle;
-    }
-
-    public String getDialogTitle() {
-        return dialogTitle;
-    }
-
-    public void setCanceled(boolean canceled) {
+    private void setCanceled(boolean canceled) {
         this.canceled = canceled;
     }
 
@@ -478,7 +495,7 @@ public class DownloadManager extends Thread {
         }
     };
 
-    public void setActivity(Activity activity) {
+    private void setActivity(Activity activity) {
         this.currentActivity = activity;
     }
 

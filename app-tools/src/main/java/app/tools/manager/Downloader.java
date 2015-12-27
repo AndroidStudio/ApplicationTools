@@ -32,4 +32,8 @@ public abstract class Downloader {
     public void onResult(Object result) {
 
     }
+
+    public String getBaseUrl() {
+        return DownloadManager.getBaseUrl();
+    }
 }
