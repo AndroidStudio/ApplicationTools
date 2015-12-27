@@ -13,15 +13,14 @@ public class MainActivity extends BaseActivity {
         setContentView(R.layout.activity_main);
 
         DownloadManager downloadManager = new DownloadManager(this);
-        //downloadManager.showProgressDialog("title", "message", false, Color.BLACK);
-        downloadManager.showProgressDialog("message");
+        downloadManager.showProgressDialog("title", "message", false, Color.BLACK);
 
-        downloadManager.download(new SimpleTask() {
-            @Override
-            public void onResult(Object result) {
+        downloadManager.download(new SimpleTask());
+        downloadManager.download(new SimpleTask());
+        downloadManager.download(new SimpleTask());
+        downloadManager.download(new SimpleTask());
+        downloadManager.download(new SimpleTask());
 
-            }
-        });
         downloadManager.start();
     }
 
