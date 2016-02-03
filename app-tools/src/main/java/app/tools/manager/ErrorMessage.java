@@ -16,8 +16,9 @@ public class ErrorMessage {
         DEFAULT_CONNECTION_ERROR_MESSAGE = "Błąd połączenia...";
     }
 
-    public static void addError(String errorMessage) {
+    public static String addError(String errorMessage) {
         errorMessageList.add(errorMessage);
+        return errorMessage;
     }
 
     public static boolean containsError(String errorMessage) {

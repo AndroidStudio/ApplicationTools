@@ -11,7 +11,7 @@ public class BaseActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        DownloadManager.init("http://navisail.witchcraftstudios.com/api/",
+        DownloadManager.init("http://test.360-hotel.com/api/",
                 ErrorMessage.DEFAULT_CONNECTION_ERROR_MESSAGE);
     }
 }

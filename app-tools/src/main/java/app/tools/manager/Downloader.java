@@ -10,6 +10,8 @@ public abstract class Downloader {
 
     public abstract void onCreateRequestParams(RequestParams requestParams);
 
+    public abstract void onCreateRequestHeaders(RequestHeaders requestHeaders);
+
     public abstract int onCreateRetryCount();
 
     public abstract String onCreateRequestMethod();
@@ -29,7 +31,7 @@ public abstract class Downloader {
         return new Exception(errorMessage);
     }
 
-    public void onResult(Object result) {
+    public void onResult(Object result) throws Exception{
 
     }
 

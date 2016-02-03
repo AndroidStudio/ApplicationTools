@@ -56,13 +56,14 @@ public class DownloadManager extends Thread {
     private String dialogMessage;
     private Context context;
 
+    private boolean cancelOnDestroy = false;
     private boolean cancelOnPause = false;
     private boolean displayDialog = false;
     private boolean horizontalStyle = false;
     private boolean canceled = false;
 
-    private int dialogStyle = ProgressDialog.THEME_HOLO_LIGHT;
     private int defaultProgressColor = Color.BLACK;
+    private int progressDialogTheme = ProgressDialog.THEME_HOLO_LIGHT;
 
     public DownloadManager(Context context) {
         setActivityLifeCycle(context);
@@ -90,6 +91,7 @@ public class DownloadManager extends Thread {
         try {
             Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND);
             if (!isAvailableInternetConnection()) {
+                error = true;
                 message = handler.obtainMessage(NO_INTERNET_CONNECTION);
                 handler.sendMessage(message);
                 return;
@@ -102,6 +104,8 @@ public class DownloadManager extends Thread {
             * */
             message = handler.obtainMessage(START_DOWNLOADING);
             handler.sendMessage(message);
+
+            sleep(1000);
 
             for (int i = 0; i < downloaderList.size(); i++) {
                 if (isCanceled()) {
@@ -163,18 +167,22 @@ public class DownloadManager extends Thread {
     }
 
     private void onPostExecute() {
-        Log.e(TAG, "***********FINISH SUCCESS***********");
-        dissmissProgressDialog();
+        Log.e(TAG, "***************FINISH**************");
+        dismissProgressDialog();
         if (downloadListener != null)
             downloadListener.onFinishSuccess();
     }
 
     private void onResourcesReady(Object object) {
         Log.e(TAG, "***********ON DOWNLOAD SUCCESS***********");
-        DownloadResult downloadResult = (DownloadResult) object;
-        Downloader downloader = downloadResult.getDownloader();
-        Object resource = downloadResult.getResult();
-        downloader.onResult(resource);
+        try {
+            DownloadResult downloadResult = (DownloadResult) object;
+            Downloader downloader = downloadResult.getDownloader();
+            Object resource = downloadResult.getResult();
+            downloader.onResult(resource);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     private void onProgressUpdate(int progress, int size, Downloader downloader) {
@@ -191,7 +199,7 @@ public class DownloadManager extends Thread {
 
     private void onError(String errorMessage) {
         Log.e(TAG, "***************ERROR**************");
-        dissmissProgressDialog();
+        dismissProgressDialog();
         if (downloadListener != null)
             downloadListener.onError(errorMessage);
     }
@@ -199,7 +207,7 @@ public class DownloadManager extends Thread {
     public void onCancelled() {
         Log.e(TAG, "************CANCELLED*************");
         setCanceled(true);
-        dissmissProgressDialog();
+        dismissProgressDialog();
         interrupt();
         disconnect();
         if (downloadListener != null)
@@ -253,11 +261,14 @@ public class DownloadManager extends Thread {
         }
         String params = uriBuilder.build().getEncodedQuery();
 
+        RequestHeaders requestHeaders = new RequestHeaders();
+        downloader.onCreateRequestHeaders(requestHeaders);
+
         for (int i = retryCount; i > 0; i--) {
             if (isCanceled()) {
                 break;
             }
-            String response = onDownloading(requestUrl, params, requestMethod);
+            String response = onDownloading(requestUrl, params, requestMethod, requestHeaders);
             if (response != null) {
                 Log.e(TAG, response);
                 Object object = downloader.onDownloadSuccess(response);
@@ -281,13 +292,31 @@ public class DownloadManager extends Thread {
         }
     }
 
-    protected String onDownloading(String requestUrl, String params, String requestMethod) {
+    protected String onDownloading(String requestUrl, String params, String requestMethod, RequestHeaders requestHeaders) {
         String response = null;
         try {
-            if (requestMethod.equals(RequestMethod.POST)) {
+            Log.w(TAG, "REQUEST_URL: " + requestUrl);
+            Log.w(TAG, "REQUEST_PARAMS: " + params);
+            Log.w(TAG, "REQUEST_METHOD: " + requestMethod);
+
+            HashMap<String, String> requestHeadersHeaders = requestHeaders.getHeaders();
+            for (String key : requestHeadersHeaders.keySet()) {
+                String value = requestHeadersHeaders.get(key);
+                Log.w(TAG, "REQUEST_HEADERS: " + key + ":" + value);
+            }
+
+            if (requestMethod.equals(RequestMethod.POST) || requestMethod.equals(RequestMethod.PUT) || requestMethod.equals(RequestMethod.DELETE)) {
                 URL postUrl = new URL(requestUrl);
                 httpURLConnection = (HttpURLConnection) postUrl.openConnection();
-                httpURLConnection.setRequestMethod(RequestMethod.POST);
+                httpURLConnection.setRequestMethod(requestMethod);
+                httpURLConnection.setDoInput(true);
+                httpURLConnection.setDoOutput(true);
+
+                for (String key : requestHeadersHeaders.keySet()) {
+                    String value = requestHeadersHeaders.get(key);
+                    httpURLConnection.setRequestProperty(key, value);
+                }
+
                 if (!TextUtils.isEmpty(params)) {
                     OutputStream outputStream = httpURLConnection.getOutputStream();
                     BufferedWriter bufferedWriter = new BufferedWriter(new OutputStreamWriter(outputStream, "UTF-8"));
@@ -300,16 +329,26 @@ public class DownloadManager extends Thread {
                 URL getUrl = new URL(requestUrl + "?" + params);
                 httpURLConnection = (HttpURLConnection) getUrl.openConnection();
                 httpURLConnection.setRequestMethod(RequestMethod.GET);
+
+                for (String key : requestHeadersHeaders.keySet()) {
+                    String value = requestHeadersHeaders.get(key);
+                    httpURLConnection.setRequestProperty(key, value);
+                }
             } else {
                 throw new Exception();
             }
 
             int responseCode = httpURLConnection.getResponseCode();
+
+            Log.w(TAG, "RESPONSE_CODE:" + responseCode);
             if (responseCode == HttpURLConnection.HTTP_OK) {
                 inputStream = httpURLConnection.getInputStream();
-
+                response = getHttpConnectionResult(inputStream);
+            } else {
+                inputStream = httpURLConnection.getErrorStream();
                 response = getHttpConnectionResult(inputStream);
             }
+
         } catch (Exception e) {
             e.printStackTrace();
             return null;
@@ -377,10 +416,14 @@ public class DownloadManager extends Thread {
         this.dialogMessage = message;
     }
 
+    public void setProgressDialogTheme(int theme) {
+        this.progressDialogTheme = theme;
+    }
+
     private void onShowProgressDialog() {
         if (progressDialog != null) return;
         try {
-            progressDialog = new ProgressDialog(context, dialogStyle);
+            progressDialog = new ProgressDialog(context, progressDialogTheme);
             if (horizontalStyle) progressDialog.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
             progressDialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
                     | WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
@@ -406,16 +449,18 @@ public class DownloadManager extends Thread {
 
             final int alertTitleId = context.getResources().getIdentifier("alertTitle", "id", "android");
             final TextView alertTitle = (TextView) progressDialog.getWindow().getDecorView().findViewById(alertTitleId);
-            alertTitle.setTextColor(defaultProgressColor);
+            if (alertTitle != null)
+                alertTitle.setTextColor(defaultProgressColor);
             final int titleDividerId = context.getResources().getIdentifier("titleDivider", "id", "android");
             final View titleDivider = progressDialog.getWindow().getDecorView().findViewById(titleDividerId);
-            titleDivider.setBackgroundColor(defaultProgressColor);
+            if (titleDivider != null)
+                titleDivider.setBackgroundColor(defaultProgressColor);
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    private void dissmissProgressDialog() {
+    private void dismissProgressDialog() {
         try {
             if (progressDialog != null)
                 progressDialog.dismiss();
@@ -438,6 +483,10 @@ public class DownloadManager extends Thread {
 
     public void setCancelOnPause(boolean cancelOnPause) {
         this.cancelOnPause = cancelOnPause;
+    }
+
+    public void setCancelOnDestroy(boolean cancelOnDestroy) {
+        this.cancelOnDestroy = cancelOnDestroy;
     }
 
     public boolean isRunning() {
@@ -491,6 +540,9 @@ public class DownloadManager extends Thread {
         public void onActivityDestroyed(Activity activity) {
             if (currentActivity != null && currentActivity == activity) {
                 downloadListener = null;
+                if (cancelOnDestroy) {
+                    onCancelled();
+                }
             }
         }
     };
