@@ -13,7 +13,6 @@ public class MainActivity extends BaseActivity {
 
         Button button = (Button) findViewById(R.id.button);
         button.setOnClickListener(new View.OnClickListener() {
-            private byte[] a = new byte[40 * 1024 * 1024];
 
             @Override
             public void onClick(View v) {
