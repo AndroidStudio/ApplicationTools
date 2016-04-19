@@ -69,7 +69,7 @@ public class DownloadManager extends Thread {
 
     private int defaultProgressColor = Color.BLACK;
     private int progressDialogTheme = ProgressDialog.THEME_HOLO_LIGHT;
-    private int sleepTime = 10;
+    private int sleepTime = 5;
 
     public DownloadManager(Context context) {
         setActivityLifeCycle(context);
