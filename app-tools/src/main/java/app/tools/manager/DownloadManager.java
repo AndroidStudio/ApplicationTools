@@ -23,13 +23,17 @@ import android.widget.TextView;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLConnection;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -43,6 +47,7 @@ public class DownloadManager extends Thread {
     private final static int ERROR = 4;
     private final static int NO_INTERNET_CONNECTION = 5;
     private final static int RESOURCES_READY = 6;
+    private static final String CHARSET = "UTF-8";
 
     private static String BASE_URL = null;
 
@@ -64,6 +69,7 @@ public class DownloadManager extends Thread {
 
     private int defaultProgressColor = Color.BLACK;
     private int progressDialogTheme = ProgressDialog.THEME_HOLO_LIGHT;
+    private int sleepTime = 10;
 
     public DownloadManager(Context context) {
         setActivityLifeCycle(context);
@@ -82,6 +88,11 @@ public class DownloadManager extends Thread {
 
     public void download(Downloader downloader) {
         this.downloaderList.add(downloader);
+    }
+
+
+    public void setSleep(int sleepTime) {
+        this.sleepTime = sleepTime;
     }
 
     @Override
@@ -105,14 +116,14 @@ public class DownloadManager extends Thread {
             message = handler.obtainMessage(START_DOWNLOADING);
             handler.sendMessage(message);
 
-            sleep(1000);
+            sleep(sleepTime);
 
             for (int i = 0; i < downloaderList.size(); i++) {
                 if (isCanceled()) {
                     break;
                 }
                 Downloader downloader = downloaderList.get(i);
-                downloader.init(context);
+                downloader.init(this, context);
                 /*
                 * onUpdateProgress
                 * */
@@ -187,7 +198,6 @@ public class DownloadManager extends Thread {
 
     private void onProgressUpdate(int progress, int size, Downloader downloader) {
         String simpleName = downloader.getClass().getSimpleName();
-        Log.e(TAG, "**********CURRENT TASK: " + simpleName + "************");
         if (downloadListener != null)
             downloadListener.onPublishProgress(progress, size, downloader);
         if (progressDialog != null && horizontalStyle) {
@@ -249,7 +259,7 @@ public class DownloadManager extends Thread {
         RequestParams requestParams = new RequestParams();
         downloader.onCreateRequestParams(requestParams);
 
-        retryCount = retryCount > 5 || retryCount < 1 ? 5 : retryCount;
+        retryCount = retryCount < 1 ? 2 : retryCount;
         requestMethod = requestMethod == null ? RequestMethod.POST : requestMethod;
         String requestUrl = downloader.onCreateUrl();
         HashMap<String, String> urlParams = requestParams.getUrlParams();
@@ -264,11 +274,14 @@ public class DownloadManager extends Thread {
         RequestHeaders requestHeaders = new RequestHeaders();
         downloader.onCreateRequestHeaders(requestHeaders);
 
+        MultipartRequestParams multipartRequestParams = new MultipartRequestParams();
+        downloader.onCreateMultipartRequestParams(multipartRequestParams);
+
         for (int i = retryCount; i > 0; i--) {
             if (isCanceled()) {
                 break;
             }
-            String response = onDownloading(requestUrl, params, requestMethod, requestHeaders);
+            String response = onDownloading(requestUrl, params, requestMethod, requestHeaders, multipartRequestParams);
             if (response != null) {
                 Log.e(TAG, response);
                 Object object = downloader.onDownloadSuccess(response);
@@ -287,13 +300,13 @@ public class DownloadManager extends Thread {
 
             if (!isCanceled()) {
                 Log.e(TAG, "******RETRY COUNT: " + (i - 1) + "*******");
-                sleep(5000);
+                Thread.sleep(1000);
             }
         }
     }
 
-    protected String onDownloading(String requestUrl, String params, String requestMethod, RequestHeaders requestHeaders) {
-        String response = null;
+    protected String onDownloading(String requestUrl, String params, String requestMethod, RequestHeaders requestHeaders, MultipartRequestParams multipartRequestParams) {
+        String response;
         try {
             Log.w(TAG, "REQUEST_URL: " + requestUrl);
             Log.w(TAG, "REQUEST_PARAMS: " + params);
@@ -305,42 +318,113 @@ public class DownloadManager extends Thread {
                 Log.w(TAG, "REQUEST_HEADERS: " + key + ":" + value);
             }
 
-            if (requestMethod.equals(RequestMethod.POST) || requestMethod.equals(RequestMethod.PUT) || requestMethod.equals(RequestMethod.DELETE)) {
-                URL postUrl = new URL(requestUrl);
-                httpURLConnection = (HttpURLConnection) postUrl.openConnection();
-                httpURLConnection.setRequestMethod(requestMethod);
-                httpURLConnection.setDoInput(true);
-                httpURLConnection.setDoOutput(true);
+            if (!TextUtils.isEmpty(params) && multipartRequestParams.getFileRequestParams().size() > 0)
+                throw new Exception("Wysyłanie zablokowane: nie można używać MultipartRequestParams oraz RequestParams jednocześnie");
 
-                for (String key : requestHeadersHeaders.keySet()) {
-                    String value = requestHeadersHeaders.get(key);
-                    httpURLConnection.setRequestProperty(key, value);
-                }
+            switch (requestMethod) {
+                case RequestMethod.POST:
+                case RequestMethod.PUT:
+                case RequestMethod.DELETE:
+                    URL postUrl = new URL(requestUrl);
+                    httpURLConnection = (HttpURLConnection) postUrl.openConnection();
+                    httpURLConnection.setRequestMethod(requestMethod);
+                    httpURLConnection.setDoInput(true);
+                    httpURLConnection.setDoOutput(true);
 
-                if (!TextUtils.isEmpty(params)) {
-                    OutputStream outputStream = httpURLConnection.getOutputStream();
-                    BufferedWriter bufferedWriter = new BufferedWriter(new OutputStreamWriter(outputStream, "UTF-8"));
-                    bufferedWriter.write(params);
-                    bufferedWriter.flush();
-                    bufferedWriter.close();
-                    outputStream.close();
-                }
-            } else if (requestMethod.equals(RequestMethod.GET)) {
-                URL getUrl = new URL(requestUrl + "?" + params);
-                httpURLConnection = (HttpURLConnection) getUrl.openConnection();
-                httpURLConnection.setRequestMethod(RequestMethod.GET);
+                    for (String key : requestHeadersHeaders.keySet()) {
+                        String value = requestHeadersHeaders.get(key);
+                        httpURLConnection.setRequestProperty(key, value);
+                    }
 
-                for (String key : requestHeadersHeaders.keySet()) {
-                    String value = requestHeadersHeaders.get(key);
-                    httpURLConnection.setRequestProperty(key, value);
-                }
-            } else {
-                throw new Exception();
+                    /*
+                    * Default request params
+                    * */
+                    if (!TextUtils.isEmpty(params)) {
+                        OutputStream outputStream = httpURLConnection.getOutputStream();
+                        BufferedWriter bufferedWriter = new BufferedWriter(new OutputStreamWriter(outputStream, CHARSET));
+                        bufferedWriter.write(params);
+                        bufferedWriter.flush();
+                        bufferedWriter.close();
+                        outputStream.close();
+                    }
+
+                    /*
+                    * Multipart request params
+                    * */
+                    HashMap<String, Object> multipartRequestParamsHashMap = multipartRequestParams.getFileRequestParams();
+                    if (multipartRequestParamsHashMap.size() > 0) {
+                        String boundary = "---------------------------" + System.currentTimeMillis();
+                        httpURLConnection.setRequestProperty("Accept-Charset", CHARSET);
+                        httpURLConnection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+                        httpURLConnection.setUseCaches(false);
+
+                        OutputStream outputStream = httpURLConnection.getOutputStream();
+                        PrintWriter printWriter = new PrintWriter(new OutputStreamWriter(outputStream, CHARSET), true);
+
+                        String CRLF = "\r\n";
+
+                        for (String key : multipartRequestParamsHashMap.keySet()) {
+                            Object object = multipartRequestParamsHashMap.get(key);
+
+                            if (object instanceof String) {
+                                String value = (String) object;
+                                printWriter.append("--").append(boundary).append(CRLF)
+                                        .append("Content-Disposition: form-data; name=").append(key)
+                                        .append("").append(CRLF)
+                                        .append("Content-Type: text/plain; charset=").append(CHARSET)
+                                        .append(CRLF).append(CRLF).append(value).append(CRLF);
+                            } else {
+                                /*
+                                * File
+                                * */
+                                File uploadFile = (File) object;
+                                String fileName = uploadFile.getName();
+
+                                printWriter.append("--").append(boundary).append(CRLF)
+                                        .append("Content-Disposition: form-data; name=").append(key).append("; filename=").append(fileName)
+                                        .append("").append(CRLF).append("Content-Type: ")
+                                        .append(URLConnection.guessContentTypeFromName(fileName)).append(CRLF)
+                                        .append(CRLF);
+
+                                printWriter.flush();
+
+                                FileInputStream inputStream = new FileInputStream(uploadFile);
+                                final byte[] buffer = new byte[4096];
+                                int bytesRead;
+                                while ((bytesRead = inputStream.read(buffer)) != -1) {
+                                    outputStream.write(buffer, 0, bytesRead);
+                                }
+                                printWriter.append(CRLF).append("--").append(boundary).append("--").append(CRLF);
+                            }
+                            printWriter.flush();
+                        }
+
+                        printWriter.close();
+                        outputStream.close();
+                    }
+                    break;
+                case RequestMethod.GET:
+                    URL getUrl;
+                    if (TextUtils.isEmpty(params)) {
+                        getUrl = new URL(requestUrl);
+                    } else {
+                        getUrl = new URL(requestUrl + "?" + params);
+                    }
+                    httpURLConnection = (HttpURLConnection) getUrl.openConnection();
+                    httpURLConnection.setRequestMethod(RequestMethod.GET);
+
+                    for (String key : requestHeadersHeaders.keySet()) {
+                        String value = requestHeadersHeaders.get(key);
+                        httpURLConnection.setRequestProperty(key, value);
+                    }
+                    break;
+                default:
+                    throw new Exception();
             }
 
             int responseCode = httpURLConnection.getResponseCode();
+            Log.w(TAG, "RESPONSE_CODE: " + responseCode);
 
-            Log.w(TAG, "RESPONSE_CODE:" + responseCode);
             if (responseCode == HttpURLConnection.HTTP_OK) {
                 inputStream = httpURLConnection.getInputStream();
                 response = getHttpConnectionResult(inputStream);

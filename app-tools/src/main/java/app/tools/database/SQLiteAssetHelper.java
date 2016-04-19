@@ -348,7 +348,7 @@ public class SQLiteAssetHelper extends SQLiteOpenHelper {
      * @param version bypass upgrade up to this version number - should never be greater than the
      * latest database version.
      */
-    void setForcedUpgrade(int version) {
+    public void setForcedUpgrade(int version) {
         mForcedUpgradeVersion = version;
     }
 
